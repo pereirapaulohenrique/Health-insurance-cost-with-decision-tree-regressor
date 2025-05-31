@@ -2,15 +2,32 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from pathlib import Path # Import Path
+
+# --- THIS MUST BE THE FIRST STREAMLIT COMMAND ---
+st.set_page_config(layout="wide")
+
+# --- Get the directory of the current script (which is inside 'Apps') ---
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# --- Go one level up to the project root, then into 'Models' ---
+MODEL_DIR = SCRIPT_DIR.parent / "Models"
+
+MODEL_PATH = MODEL_DIR / 'enhanced_decision_tree_model.joblib'
+MODEL_COLUMNS_PATH = MODEL_DIR / 'model_columns.joblib'
 
 # --- Load the Saved Model and Columns ---
-# Ensure these files are in the same directory as your Streamlit app, or provide the correct path.
 try:
-    model = joblib.load('enhanced_decision_tree_model.joblib')
-    model_columns = joblib.load('model_columns.joblib')
+    model = joblib.load(MODEL_PATH)
+    model_columns = joblib.load(MODEL_COLUMNS_PATH)
 except FileNotFoundError:
-    st.error("Model files not found! Make sure 'enhanced_decision_tree_model.joblib' and 'model_columns.joblib' are in the app directory.")
-    st.stop() # Stop execution if model files are missing
+    st.error(
+        f"Model files not found! Searched for these absolute paths:\n"
+        f"- Model: {MODEL_PATH.resolve()}\n"
+        f"- Columns: {MODEL_COLUMNS_PATH.resolve()}\n"
+        f"Please ensure a 'Models' folder exists at the project root (same level as your 'Apps' folder) and contains the .joblib files."
+    )
+    st.stop()
 
 # --- Helper Function to Preprocess Inputs (Same as in cost_estimator_app.py) ---
 def preprocess_input(age, sex, bmi, children, smoker, region, all_model_columns):
@@ -48,89 +65,86 @@ def preprocess_input(age, sex, bmi, children, smoker, region, all_model_columns)
     return final_input_df
 
 # --- Function to Determine Risk Category and Key Factors ---
-def assess_risk_profile(prediction, age, bmi, smoker):
+def assess_risk_profile(prediction, age, bmi_value, smoker_status): # Renamed bmi and smoker for clarity
     risk_category = ""
     key_factors_summary = []
 
-    # Define risk thresholds (these are illustrative, adjust as needed based on your data's charge distribution)
-    if prediction < 8000: # Example threshold
+    # Define risk thresholds (these are illustrative, adjust based on your data's charge distribution)
+    if prediction < 8000: 
         risk_category = "Low Risk"
-    elif prediction < 20000: # Example threshold
+    elif prediction < 20000: 
         risk_category = "Medium Risk"
     else:
         risk_category = "High Risk"
 
-    # Simplified key factors (based on general knowledge from your model)
-    if smoker == 'yes':
-        key_factors_summary.append("Applicant is a smoker.")
-    if age > 50: # Example threshold
-        key_factors_summary.append(f"Applicant age ({age}) is in a higher-cost bracket.")
-    if bmi > 30: # Example threshold (Obese category)
-        key_factors_summary.append(f"Applicant BMI ({bmi:.2f}) is in the obese category.")
+    # Simplified key factors
+    if smoker_status == 'yes':
+        key_factors_summary.append("Applicant is a **smoker**.")
+    if age > 50: 
+        key_factors_summary.append(f"Applicant age ({age}) is **over 50**.")
+    if bmi_value > 30: 
+        key_factors_summary.append(f"Applicant BMI ({bmi_value:.2f}) is in the **obese category (>30)**.")
     
     if not key_factors_summary and risk_category == "Low Risk":
-        key_factors_summary.append("Applicant profile suggests lower costs based on primary factors.")
-    elif not key_factors_summary:
+        key_factors_summary.append("Profile suggests lower costs based on primary factors.")
+    elif not key_factors_summary: # For Medium risk with no obvious flags
          key_factors_summary.append("Predicted cost influenced by a combination of factors.")
-
 
     return risk_category, key_factors_summary
 
 # --- Streamlit App Interface ---
-st.set_page_config(layout="wide")
 st.title("Underwriter's Assistant: Risk Profiler 🛡️")
 
-# Use columns for layout
-col1, col2 = st.columns([1, 2]) # Input column, Output column
+col1, col2 = st.columns([1, 1.5]) # Adjusted column widths
 
 with col1:
     st.header("Applicant Details:")
-    age = st.number_input("Age", min_value=18, max_value=100, value=30, step=1)
+    age_input = st.number_input("Age", min_value=18, max_value=100, value=30, step=1, key='age_uw')
     
     st.subheader("BMI Calculation")
-    height_cm = st.number_input("Height (cm)", min_value=50, max_value=250, value=170, step=1)
-    weight_kg = st.number_input("Weight (kg)", min_value=20.0, max_value=200.0, value=70.0, step=0.1, format="%.1f")
+    height_cm_input = st.number_input("Height (cm)", min_value=50, max_value=250, value=170, step=1, key='height_uw')
+    weight_kg_input = st.number_input("Weight (kg)", min_value=20.0, max_value=200.0, value=70.0, step=0.1, format="%.1f", key='weight_uw')
 
-    calculated_bmi = 0.0
-    if height_cm > 0:
-        height_m = height_cm / 100
-        calculated_bmi = weight_kg / (height_m ** 2)
-        st.metric(label="Calculated BMI", value=f"{calculated_bmi:.2f}")
+    calculated_bmi_uw = 0.0
+    if height_cm_input > 0:
+        height_m_uw = height_cm_input / 100
+        calculated_bmi_uw = weight_kg_input / (height_m_uw ** 2)
+        st.metric(label="Calculated BMI", value=f"{calculated_bmi_uw:.2f}")
     else:
         st.warning("Valid height needed for BMI.")
 
-    sex = st.selectbox("Sex", ('male', 'female'), key='sex_underwriter')
-    children = st.selectbox("Number of Children", (0, 1, 2, 3, 4, 5), key='children_underwriter')
-    smoker = st.selectbox("Smoker", ('no', 'yes'), key='smoker_underwriter') # Default to 'no'
-    region = st.selectbox("Region", ('northeast', 'northwest', 'southeast', 'southwest'), key='region_underwriter')
+    sex_input = st.selectbox("Sex", ('male', 'female'), key='sex_uw')
+    children_input = st.selectbox("Number of Children", (0, 1, 2, 3, 4, 5), key='children_uw')
+    smoker_input = st.selectbox("Smoker", ('no', 'yes'), key='smoker_uw')
+    region_input = st.selectbox("Region", ('northeast', 'northwest', 'southeast', 'southwest'), key='region_uw')
 
-# "Assess Risk" button in the input column
 if col1.button("Assess Applicant Risk Profile"):
-    if height_cm <= 0:
+    if height_cm_input <= 0:
         col2.error("Height must be greater than 0 cm to calculate BMI and assess risk.")
     else:
-        processed_input_df = preprocess_input(age, sex, calculated_bmi, children, smoker, region, model_columns)
-        log_prediction = model.predict(processed_input_df)
-        prediction = np.expm1(log_prediction)[0]
+        processed_input_df_uw = preprocess_input(age_input, sex_input, calculated_bmi_uw, children_input, smoker_input, region_input, model_columns)
+        log_prediction_uw = model.predict(processed_input_df_uw)
+        prediction_uw = np.expm1(log_prediction_uw)[0]
         
-        risk_category, key_factors = assess_risk_profile(prediction, age, calculated_bmi, smoker)
+        risk_category_uw, key_factors_uw = assess_risk_profile(prediction_uw, age_input, calculated_bmi_uw, smoker_input)
         
         with col2:
             st.header("Risk Assessment Output:")
             st.subheader("Predicted Annual Cost:")
-            st.markdown(f"<h3 style='color: blue;'>${prediction:,.2f}</h3>", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='color: blue;'>${prediction_uw:,.2f}</h3>", unsafe_allow_html=True)
             
             st.subheader("Risk Category:")
-            if risk_category == "High Risk":
-                st.markdown(f"<h3 style='color: red;'>{risk_category}</h3>", unsafe_allow_html=True)
-            elif risk_category == "Medium Risk":
-                st.markdown(f"<h3 style='color: orange;'>{risk_category}</h3>", unsafe_allow_html=True)
-            else: # Low Risk
-                st.markdown(f"<h3 style='color: green;'>{risk_category}</h3>", unsafe_allow_html=True)
+            risk_color = "green" # Default for Low Risk
+            if risk_category_uw == "High Risk": risk_color = "red"
+            elif risk_category_uw == "Medium Risk": risk_color = "orange"
+            st.markdown(f"<h3 style='color: {risk_color};'>{risk_category_uw}</h3>", unsafe_allow_html=True)
 
             st.subheader("Key Contributing Factors / Observations:")
-            for factor in key_factors:
-                st.markdown(f"- {factor}")
+            if key_factors_uw:
+                for factor in key_factors_uw:
+                    st.markdown(f"- {factor}")
+            else: # Should be covered by logic in assess_risk_profile
+                st.markdown("- No single dominant high-risk factor identified; cost driven by overall profile.")
             
             st.markdown("---")
             st.markdown("""

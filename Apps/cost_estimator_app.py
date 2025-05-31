@@ -2,26 +2,39 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from pathlib import Path # Import Path
+
+# --- THIS MUST BE THE FIRST STREAMLIT COMMAND ---
+st.set_page_config(layout="wide") 
+
+# --- Get the directory of the current script (which is inside 'Apps') ---
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# --- Go one level up to the project root, then into 'Models' ---
+MODEL_DIR = SCRIPT_DIR.parent / "Models" 
+
+MODEL_PATH = MODEL_DIR / 'enhanced_decision_tree_model.joblib'
+MODEL_COLUMNS_PATH = MODEL_DIR / 'model_columns.joblib'
 
 # --- Load the Saved Model and Columns ---
-# Ensure these files are in the same directory as your Streamlit app, or provide the correct path.
 try:
-    model = joblib.load('enhanced_decision_tree_model.joblib')
-    model_columns = joblib.load('model_columns.joblib')
+    model = joblib.load(MODEL_PATH)
+    model_columns = joblib.load(MODEL_COLUMNS_PATH)
 except FileNotFoundError:
-    st.error("Model files not found! Make sure 'enhanced_decision_tree_model.joblib' and 'model_columns.joblib' are in the app directory.")
+    st.error(
+        f"Model files not found! Searched for these absolute paths:\n"
+        f"- Model: {MODEL_PATH.resolve()}\n"
+        f"- Columns: {MODEL_COLUMNS_PATH.resolve()}\n"
+        f"Please ensure a 'Models' folder exists at the project root (same level as your 'Apps' folder) and contains the .joblib files."
+    )
     st.stop() # Stop execution if model files are missing
 
 
-# --- Helper Function to Preprocess Inputs (Using the more robust version) ---
+# --- Helper Function to Preprocess Inputs ---
 def preprocess_input(age, sex, bmi, children, smoker, region, all_model_columns):
     raw_data = {
-        'age': age,
-        'sex': sex, # Will be dropped after one-hot encoding
-        'bmi': bmi, # Now calculated and passed in
-        'children': children,
-        'smoker': smoker, # Will be dropped
-        'region': region  # Will be dropped
+        'age': age, 'sex': sex, 'bmi': bmi, 
+        'children': children, 'smoker': smoker, 'region': region
     }
     input_df_raw = pd.DataFrame([raw_data])
 
@@ -29,23 +42,23 @@ def preprocess_input(age, sex, bmi, children, smoker, region, all_model_columns)
     input_df_processed['sex_male'] = 1 if sex == 'male' else 0
     input_df_processed['smoker_yes'] = 1 if smoker == 'yes' else 0
     
-    # Region encoding - adjust if your base region was different (e.g., if 'region_northeast' was dropped)
+    # Region encoding (assuming 'region_northeast' was the base/dropped category during training)
     input_df_processed['region_northwest'] = 1 if region == 'northwest' else 0
     input_df_processed['region_southeast'] = 1 if region == 'southeast' else 0
     input_df_processed['region_southwest'] = 1 if region == 'southwest' else 0
-    # 'region_northeast' would be all zeros if it was the base category (drop_first=True during training)
 
     columns_to_drop_after_encoding = ['sex', 'smoker', 'region']
     for col in columns_to_drop_after_encoding:
         if col in input_df_processed.columns:
             input_df_processed = input_df_processed.drop(columns=[col])
     
-    # Feature Engineering
+    # Feature Engineering (must match training)
     input_df_processed['age_bmi_interaction'] = input_df_processed['age'] * input_df_processed['bmi']
     input_df_processed['smoker_bmi_interaction'] = input_df_processed['smoker_yes'] * input_df_processed['bmi']
     input_df_processed['smoker_age_interaction'] = input_df_processed['smoker_yes'] * input_df_processed['age']
     input_df_processed['age_squared'] = input_df_processed['age']**2
     
+    # Create the final DataFrame with columns in the exact order the model expects
     final_input_df = pd.DataFrame(np.zeros((1, len(all_model_columns))), columns=all_model_columns)
     
     for col in input_df_processed.columns:
@@ -56,15 +69,12 @@ def preprocess_input(age, sex, bmi, children, smoker, region, all_model_columns)
     return final_input_df
 
 # --- Streamlit App Interface ---
-st.set_page_config(layout="wide") # Use wide layout
 st.title("Health Insurance Cost Estimator 🩺")
 
 st.sidebar.header("Enter Your Details:")
 
-# Input fields
 age = st.sidebar.number_input("Age", min_value=18, max_value=100, value=30, step=1)
 
-# --- BMI Calculation Inputs ---
 st.sidebar.subheader("BMI Calculation")
 height_cm = st.sidebar.number_input("Height (cm)", min_value=50, max_value=250, value=170, step=1)
 weight_kg = st.sidebar.number_input("Weight (kg)", min_value=20.0, max_value=200.0, value=70.0, step=0.1, format="%.1f")
@@ -78,30 +88,21 @@ else:
     st.sidebar.warning("Please enter a valid height.")
 
 sex = st.sidebar.selectbox("Sex", ('male', 'female'))
-children = st.sidebar.selectbox("Number of Children", (0, 1, 2, 3, 4, 5)) # Using selectbox for consistency
-smoker = st.sidebar.selectbox("Smoker", ('no', 'yes')) # Changed order for 'no' as default
+children = st.sidebar.selectbox("Number of Children", (0, 1, 2, 3, 4, 5))
+smoker = st.sidebar.selectbox("Smoker", ('no', 'yes')) 
 region = st.sidebar.selectbox("Region", ('northeast', 'northwest', 'southeast', 'southwest'))
 
-
-# Predict button
 if st.sidebar.button("Estimate Cost"):
-    if height_cm <= 0: # Basic validation for height
+    if height_cm <= 0: 
         st.error("Height must be greater than 0 cm to calculate BMI.")
     else:
-        # Preprocess the input using the calculated BMI
         processed_input_df = preprocess_input(age, sex, calculated_bmi, children, smoker, region, model_columns)
-        
-        # Make prediction (model predicts on log scale)
         log_prediction = model.predict(processed_input_df)
-        
-        # Convert prediction back to original scale
         prediction = np.expm1(log_prediction)
         
         st.subheader("Estimated Annual Insurance Cost:")
         st.markdown(f"<h2 style='text-align: center; color: green;'>${prediction[0]:,.2f}</h2>", unsafe_allow_html=True)
-        
         st.balloons()
-
         st.markdown("---")
         st.markdown("""
         **Disclaimer:** This is an estimate based on a machine learning model and historical data. 
